@@ -32,26 +32,26 @@ if __name__ == "__main__":
     y = torch.randn(numel, dtype=torch.float16, device="cuda")
     output_torch = x + y
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     add(x, y, out)
 
     print("torch output:\n", output_torch)
     print("cuda output (1 elem):\n", out)
     assert torch.allclose(output_torch, out)
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     add_element2(x, y, out)
 
     print("cuda output (2 elems):\n", out)
     assert torch.allclose(output_torch, out)
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     add_element2_interleaved(x, y, out)
 
     print("cuda output (2 elems interleaved):\n", out)
     assert torch.allclose(output_torch, out)
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     torch.cuda.profiler.start()
     add_triton(x, y, out)
     torch.cuda.profiler.stop()

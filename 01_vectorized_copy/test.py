@@ -29,20 +29,20 @@ if __name__ == "__main__":
     numel = 2**16 + 123
     x = torch.randn(numel, dtype=torch.float16, device="cuda")
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     copy(x, out)
 
     print("input:\n", x)
     print("output:\n", out)
     assert torch.allclose(x, out, atol=0, rtol=0)
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     vectorized_copy(x, out)
 
     print("output (vectorized):\n", out)
     assert torch.allclose(x, out, atol=0, rtol=0)
 
-    out = torch.empty_like(x)
+    out = torch.zeros_like(x)
     torch.cuda.profiler.start()
     copy_triton(x, out)
     torch.cuda.profiler.stop()
