@@ -53,72 +53,21 @@ void vectorized_copy(T const* in, T* out, size_t n) {
 void launch_copy(torch::Tensor const& in, torch::Tensor& out) {
   size_t n = in.numel();
 
-  switch (in.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      copy(in.data_ptr<float>(), out.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      copy(in.data_ptr<double>(), out.data_ptr<double>(), n);
-      break;
-
-    case at::ScalarType::Half:
-      copy(reinterpret_cast<half const*>(in.data_ptr<at::Half>()),
-           reinterpret_cast<half*>(out.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      copy(reinterpret_cast<__nv_bfloat16 const*>(in.data_ptr<at::BFloat16>()),
-           reinterpret_cast<__nv_bfloat16*>(out.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      copy(in.data_ptr<int>(), out.data_ptr<int>(), n);
-      break;
-
-    case at::ScalarType::Long:
-      copy(in.data_ptr<long>(), out.data_ptr<long>(), n);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = in.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, type, "copy",
+      [&]() { copy(in.data_ptr<scalar_t>(), out.data_ptr<scalar_t>(), n); });
 }
 
 void launch_vectorized_copy(torch::Tensor const& in, torch::Tensor& out) {
   size_t n = in.numel();
 
-  switch (in.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      vectorized_copy(in.data_ptr<float>(), out.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      vectorized_copy(in.data_ptr<double>(), out.data_ptr<double>(), n);
-      break;
-
-    case at::ScalarType::Half:
-      vectorized_copy(reinterpret_cast<half const*>(in.data_ptr<at::Half>()),
-                      reinterpret_cast<half*>(out.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      vectorized_copy(
-          reinterpret_cast<__nv_bfloat16 const*>(in.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16*>(out.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      vectorized_copy(in.data_ptr<int>(), out.data_ptr<int>(), n);
-      break;
-
-    case at::ScalarType::Long:
-      vectorized_copy(in.data_ptr<long>(), out.data_ptr<long>(), n);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = in.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "vectorized_copy", [&]() {
+                               vectorized_copy(in.data_ptr<scalar_t>(),
+                                               out.data_ptr<scalar_t>(), n);
+                             });
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

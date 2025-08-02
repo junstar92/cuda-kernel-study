@@ -27,41 +27,13 @@ void load_without_ldg(torch::Tensor& output, torch::Tensor const& input) {
   size_t const n = input.numel();
   size_t const grid = (n + block - 1) / block;
 
-  switch (input.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      load_without_ldg_kernel<<<grid, block>>>(output.data_ptr<float>(),
-                                               input.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      load_without_ldg_kernel<<<grid, block>>>(output.data_ptr<double>(),
-                                               input.data_ptr<double>(), n);
-      break;
-
-    case at::ScalarType::Half:
-      load_without_ldg_kernel<<<grid, block>>>(
-          reinterpret_cast<half*>(output.data_ptr<at::Half>()),
-          reinterpret_cast<half*>(input.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      load_without_ldg_kernel<<<grid, block>>>(
-          reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16*>(input.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      load_without_ldg_kernel<<<grid, block>>>(output.data_ptr<int>(),
-                                               input.data_ptr<int>(), n);
-      break;
-
-    case at::ScalarType::Long:
-      load_without_ldg_kernel<<<grid, block>>>(output.data_ptr<long>(),
-                                               input.data_ptr<long>(), n);
-      break;
-  }
-
-  TORCH_CHECK(cudaGetLastError() == cudaError_t::cudaSuccess);
+  auto type = input.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "load_without_ldg_kernel", [&]() {
+                               load_without_ldg_kernel<<<grid, block>>>(
+                                   output.data_ptr<scalar_t>(),
+                                   input.data_ptr<scalar_t>(), n);
+                             });
 }
 
 void load_with_ldg(torch::Tensor& output, torch::Tensor const& input) {
@@ -69,41 +41,13 @@ void load_with_ldg(torch::Tensor& output, torch::Tensor const& input) {
   size_t const n = input.numel();
   size_t const grid = (n + block - 1) / block;
 
-  switch (input.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      load_with_ldg_kernel<<<grid, block>>>(output.data_ptr<float>(),
-                                            input.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      load_with_ldg_kernel<<<grid, block>>>(output.data_ptr<double>(),
-                                            input.data_ptr<double>(), n);
-      break;
-
-    case at::ScalarType::Half:
-      load_with_ldg_kernel<<<grid, block>>>(
-          reinterpret_cast<half*>(output.data_ptr<at::Half>()),
-          reinterpret_cast<half*>(input.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      load_with_ldg_kernel<<<grid, block>>>(
-          reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16*>(input.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      load_with_ldg_kernel<<<grid, block>>>(output.data_ptr<int>(),
-                                            input.data_ptr<int>(), n);
-      break;
-
-    case at::ScalarType::Long:
-      load_with_ldg_kernel<<<grid, block>>>(output.data_ptr<long>(),
-                                            input.data_ptr<long>(), n);
-      break;
-  }
-
-  TORCH_CHECK(cudaGetLastError() == cudaError_t::cudaSuccess);
+  auto type = input.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "load_with_ldg_kernel", [&]() {
+                               load_with_ldg_kernel<<<grid, block>>>(
+                                   output.data_ptr<scalar_t>(),
+                                   input.data_ptr<scalar_t>(), n);
+                             });
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

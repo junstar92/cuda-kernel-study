@@ -130,40 +130,12 @@ void launch_add(const torch::Tensor &a, const torch::Tensor &b,
   // Get the size of the tensors
   size_t n = a.numel();
 
-  // Launch the add function
-  switch (a.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      add(a.data_ptr<float>(), b.data_ptr<float>(), out.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      add(a.data_ptr<double>(), b.data_ptr<double>(), out.data_ptr<double>(),
-          n);
-      break;
-
-    case at::ScalarType::Half:
-      add((half const *)(a.data_ptr<at::Half>()),
-          (half const *)(b.data_ptr<at::Half>()),
-          (half *)(out.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      add((__nv_bfloat16 const *)(a.data_ptr<at::BFloat16>()),
-          (__nv_bfloat16 const *)(b.data_ptr<at::BFloat16>()),
-          (__nv_bfloat16 *)(out.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      add(a.data_ptr<int>(), b.data_ptr<int>(), out.data_ptr<int>(), n);
-      break;
-
-    case at::ScalarType::Long:
-      add(a.data_ptr<long>(), b.data_ptr<long>(), out.data_ptr<long>(), n);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = a.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, type, "add", [&]() {
+        add(a.data_ptr<scalar_t>(), b.data_ptr<scalar_t>(),
+            out.data_ptr<scalar_t>(), n);
+      });
 }
 
 void launch_add_element2(const torch::Tensor &a, const torch::Tensor &b,
@@ -171,43 +143,13 @@ void launch_add_element2(const torch::Tensor &a, const torch::Tensor &b,
   // Get the size of the tensors
   size_t n = a.numel();
 
-  // Launch the add function
-  switch (a.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      add_element2(a.data_ptr<float>(), b.data_ptr<float>(),
-                   out.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      add_element2(a.data_ptr<double>(), b.data_ptr<double>(),
-                   out.data_ptr<double>(), n);
-      break;
-
-    case at::ScalarType::Half:
-      add_element2((half const *)(a.data_ptr<at::Half>()),
-                   (half const *)(b.data_ptr<at::Half>()),
-                   (half *)(out.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      add_element2((__nv_bfloat16 const *)(a.data_ptr<at::BFloat16>()),
-                   (__nv_bfloat16 const *)(b.data_ptr<at::BFloat16>()),
-                   (__nv_bfloat16 *)(out.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      add_element2(a.data_ptr<int>(), b.data_ptr<int>(), out.data_ptr<int>(),
-                   n);
-      break;
-
-    case at::ScalarType::Long:
-      add_element2(a.data_ptr<long>(), b.data_ptr<long>(), out.data_ptr<long>(),
-                   n);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = a.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "add_element2", [&]() {
+                               add_element2(a.data_ptr<scalar_t>(),
+                                            b.data_ptr<scalar_t>(),
+                                            out.data_ptr<scalar_t>(), n);
+                             });
 }
 
 void launch_add_element2_interleaved(const torch::Tensor &a,
@@ -216,44 +158,13 @@ void launch_add_element2_interleaved(const torch::Tensor &a,
   // Get the size of the tensors
   size_t n = a.numel();
 
-  // Launch the add function
-  switch (a.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      add_element2_interleaved(a.data_ptr<float>(), b.data_ptr<float>(),
-                               out.data_ptr<float>(), n);
-      break;
-
-    case at::ScalarType::Double:
-      add_element2_interleaved(a.data_ptr<double>(), b.data_ptr<double>(),
-                               out.data_ptr<double>(), n);
-      break;
-
-    case at::ScalarType::Half:
-      add_element2_interleaved((half const *)(a.data_ptr<at::Half>()),
-                               (half const *)(b.data_ptr<at::Half>()),
-                               (half *)(out.data_ptr<at::Half>()), n);
-      break;
-
-    case at::ScalarType::BFloat16:
-      add_element2_interleaved(
-          (__nv_bfloat16 const *)(a.data_ptr<at::BFloat16>()),
-          (__nv_bfloat16 const *)(b.data_ptr<at::BFloat16>()),
-          (__nv_bfloat16 *)(out.data_ptr<at::BFloat16>()), n);
-      break;
-
-    case at::ScalarType::Int:
-      add_element2_interleaved(a.data_ptr<int>(), b.data_ptr<int>(),
-                               out.data_ptr<int>(), n);
-      break;
-
-    case at::ScalarType::Long:
-      add_element2_interleaved(a.data_ptr<long>(), b.data_ptr<long>(),
-                               out.data_ptr<long>(), n);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = a.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, type,
+      "add_element2_interleaved", [&]() {
+        add_element2_interleaved(a.data_ptr<scalar_t>(), b.data_ptr<scalar_t>(),
+                                 out.data_ptr<scalar_t>(), n);
+      });
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

@@ -282,115 +282,35 @@ void launch_copy(torch::Tensor& dst, torch::Tensor const& src) {
   size_t const M = src.size(0);
   size_t const N = src.size(1);
 
-  switch (dst.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      copy(dst.data_ptr<float>(), src.data_ptr<float>(), M, N);
-      break;
-
-    case at::ScalarType::Double:
-      copy(dst.data_ptr<double>(), src.data_ptr<double>(), M, N);
-      break;
-
-    case at::ScalarType::Half:
-      copy(reinterpret_cast<half*>(dst.data_ptr<at::Half>()),
-           reinterpret_cast<half const*>(src.data_ptr<at::Half>()), M, N);
-      break;
-
-    case at::ScalarType::BFloat16:
-      copy(reinterpret_cast<__nv_bfloat16*>(dst.data_ptr<at::BFloat16>()),
-           reinterpret_cast<__nv_bfloat16 const*>(src.data_ptr<at::BFloat16>()),
-           M, N);
-      break;
-
-    case at::ScalarType::Int:
-      copy(dst.data_ptr<int>(), src.data_ptr<int>(), M, N);
-      break;
-
-    case at::ScalarType::Long:
-      copy(dst.data_ptr<long>(), src.data_ptr<long>(), M, N);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = dst.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, type, "copy", [&]() {
+        copy(dst.data_ptr<scalar_t>(), src.data_ptr<scalar_t>(), M, N);
+      });
 }
 
 void launch_transpose_row(torch::Tensor& dst, torch::Tensor const& src) {
   size_t const M = src.size(0);
   size_t const N = src.size(1);
 
-  switch (dst.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      transpose_row(dst.data_ptr<float>(), src.data_ptr<float>(), M, N);
-      break;
-
-    case at::ScalarType::Double:
-      transpose_row(dst.data_ptr<double>(), src.data_ptr<double>(), M, N);
-      break;
-
-    case at::ScalarType::Half:
-      transpose_row(reinterpret_cast<half*>(dst.data_ptr<at::Half>()),
-                    reinterpret_cast<half const*>(src.data_ptr<at::Half>()), M,
-                    N);
-      break;
-
-    case at::ScalarType::BFloat16:
-      transpose_row(
-          reinterpret_cast<__nv_bfloat16*>(dst.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16 const*>(src.data_ptr<at::BFloat16>()),
-          M, N);
-      break;
-
-    case at::ScalarType::Int:
-      transpose_row(dst.data_ptr<int>(), src.data_ptr<int>(), M, N);
-      break;
-
-    case at::ScalarType::Long:
-      transpose_row(dst.data_ptr<long>(), src.data_ptr<long>(), M, N);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = dst.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "transpose_row", [&]() {
+                               transpose_row(dst.data_ptr<scalar_t>(),
+                                             src.data_ptr<scalar_t>(), M, N);
+                             });
 }
 
 void launch_transpose_col(torch::Tensor& dst, torch::Tensor const& src) {
   size_t const M = src.size(0);
   size_t const N = src.size(1);
 
-  switch (dst.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      transpose_col(dst.data_ptr<float>(), src.data_ptr<float>(), M, N);
-      break;
-
-    case at::ScalarType::Double:
-      transpose_col(dst.data_ptr<double>(), src.data_ptr<double>(), M, N);
-      break;
-
-    case at::ScalarType::Half:
-      transpose_col(reinterpret_cast<half*>(dst.data_ptr<at::Half>()),
-                    reinterpret_cast<half const*>(src.data_ptr<at::Half>()), M,
-                    N);
-      break;
-
-    case at::ScalarType::BFloat16:
-      transpose_col(
-          reinterpret_cast<__nv_bfloat16*>(dst.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16 const*>(src.data_ptr<at::BFloat16>()),
-          M, N);
-      break;
-
-    case at::ScalarType::Int:
-      transpose_col(dst.data_ptr<int>(), src.data_ptr<int>(), M, N);
-      break;
-
-    case at::ScalarType::Long:
-      transpose_col(dst.data_ptr<long>(), src.data_ptr<long>(), M, N);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = dst.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "transpose_col", [&]() {
+                               transpose_col(dst.data_ptr<scalar_t>(),
+                                             src.data_ptr<scalar_t>(), M, N);
+                             });
 }
 
 void launch_transpose_col_unroll_4(torch::Tensor& dst,
@@ -398,41 +318,13 @@ void launch_transpose_col_unroll_4(torch::Tensor& dst,
   size_t const M = src.size(0);
   size_t const N = src.size(1);
 
-  switch (dst.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      transpose_col_unroll_4(dst.data_ptr<float>(), src.data_ptr<float>(), M,
-                             N);
-      break;
-
-    case at::ScalarType::Double:
-      transpose_col_unroll_4(dst.data_ptr<double>(), src.data_ptr<double>(), M,
-                             N);
-      break;
-
-    case at::ScalarType::Half:
-      transpose_col_unroll_4(
-          reinterpret_cast<half*>(dst.data_ptr<at::Half>()),
-          reinterpret_cast<half const*>(src.data_ptr<at::Half>()), M, N);
-      break;
-
-    case at::ScalarType::BFloat16:
-      transpose_col_unroll_4(
-          reinterpret_cast<__nv_bfloat16*>(dst.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16 const*>(src.data_ptr<at::BFloat16>()),
-          M, N);
-      break;
-
-    case at::ScalarType::Int:
-      transpose_col_unroll_4(dst.data_ptr<int>(), src.data_ptr<int>(), M, N);
-      break;
-
-    case at::ScalarType::Long:
-      transpose_col_unroll_4(dst.data_ptr<long>(), src.data_ptr<long>(), M, N);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = dst.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "transpose_col_unroll_4", [&]() {
+                               transpose_col_unroll_4(dst.data_ptr<scalar_t>(),
+                                                      src.data_ptr<scalar_t>(),
+                                                      M, N);
+                             });
 }
 
 void launch_transpose_col_unroll_n(torch::Tensor& dst,
@@ -440,41 +332,13 @@ void launch_transpose_col_unroll_n(torch::Tensor& dst,
   size_t const M = src.size(0);
   size_t const N = src.size(1);
 
-  switch (dst.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      transpose_col_unroll_n(dst.data_ptr<float>(), src.data_ptr<float>(), M,
-                             N);
-      break;
-
-    case at::ScalarType::Double:
-      transpose_col_unroll_n(dst.data_ptr<double>(), src.data_ptr<double>(), M,
-                             N);
-      break;
-
-    case at::ScalarType::Half:
-      transpose_col_unroll_n(
-          reinterpret_cast<half*>(dst.data_ptr<at::Half>()),
-          reinterpret_cast<half const*>(src.data_ptr<at::Half>()), M, N);
-      break;
-
-    case at::ScalarType::BFloat16:
-      transpose_col_unroll_n(
-          reinterpret_cast<__nv_bfloat16*>(dst.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16 const*>(src.data_ptr<at::BFloat16>()),
-          M, N);
-      break;
-
-    case at::ScalarType::Int:
-      transpose_col_unroll_n(dst.data_ptr<int>(), src.data_ptr<int>(), M, N);
-      break;
-
-    case at::ScalarType::Long:
-      transpose_col_unroll_n(dst.data_ptr<long>(), src.data_ptr<long>(), M, N);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = dst.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "transpose_col_unroll_n", [&]() {
+                               transpose_col_unroll_n(dst.data_ptr<scalar_t>(),
+                                                      src.data_ptr<scalar_t>(),
+                                                      M, N);
+                             });
 }
 
 void launch_transpose_shm(torch::Tensor& dst, torch::Tensor const& src,
@@ -482,39 +346,13 @@ void launch_transpose_shm(torch::Tensor& dst, torch::Tensor const& src,
   size_t const M = src.size(0);
   size_t const N = src.size(1);
 
-  switch (dst.dtype().toScalarType()) {
-    case at::ScalarType::Float:
-      transpose_shm(dst.data_ptr<float>(), src.data_ptr<float>(), M, N, ver);
-      break;
-
-    case at::ScalarType::Double:
-      transpose_shm(dst.data_ptr<double>(), src.data_ptr<double>(), M, N, ver);
-      break;
-
-    case at::ScalarType::Half:
-      transpose_shm(reinterpret_cast<half*>(dst.data_ptr<at::Half>()),
-                    reinterpret_cast<half const*>(src.data_ptr<at::Half>()), M,
-                    N, ver);
-      break;
-
-    case at::ScalarType::BFloat16:
-      transpose_shm(
-          reinterpret_cast<__nv_bfloat16*>(dst.data_ptr<at::BFloat16>()),
-          reinterpret_cast<__nv_bfloat16 const*>(src.data_ptr<at::BFloat16>()),
-          M, N, ver);
-      break;
-
-    case at::ScalarType::Int:
-      transpose_shm(dst.data_ptr<int>(), src.data_ptr<int>(), M, N, ver);
-      break;
-
-    case at::ScalarType::Long:
-      transpose_shm(dst.data_ptr<long>(), src.data_ptr<long>(), M, N, ver);
-      break;
-
-    default:
-      TORCH_CHECK(false, "Unsupported tensor dtype");
-  }
+  auto type = dst.scalar_type();
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+                             type, "transpose_shm", [&]() {
+                               transpose_shm(dst.data_ptr<scalar_t>(),
+                                             src.data_ptr<scalar_t>(), M, N,
+                                             ver);
+                             });
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
