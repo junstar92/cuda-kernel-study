@@ -7,7 +7,6 @@
 
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
-#include <cuda_profiler_api.h>
 #include <cuda_runtime.h>
 #include <torch/extension.h>
 #include <vector_types.h>
@@ -102,27 +101,21 @@ template <typename T, size_t BLOCK_SIZE = 256>
 void add(T const *a, T const *b, T *out, size_t n) {
   size_t grids = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-  cudaProfilerStart();
   add_kernel<<<grids, BLOCK_SIZE>>>(a, b, out, n);
-  cudaProfilerStop();
 }
 
 template <typename T, size_t BLOCK_SIZE = 256>
 void add_element2(T const *a, T const *b, T *out, size_t n) {
   size_t grids = (n / 2 + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-  cudaProfilerStart();
   add_element2_kernel<<<grids, BLOCK_SIZE>>>(a, b, out, n);
-  cudaProfilerStop();
 }
 
 template <typename T, size_t BLOCK_SIZE = 256>
 void add_element2_interleaved(T const *a, T const *b, T *out, size_t n) {
   size_t grids = (n / 2 + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-  cudaProfilerStart();
   add_element2_interleaved_kernel<<<grids, BLOCK_SIZE>>>(a, b, out, n);
-  cudaProfilerStop();
 }
 
 void launch_add(const torch::Tensor &a, const torch::Tensor &b,

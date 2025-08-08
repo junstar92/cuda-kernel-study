@@ -1,11 +1,10 @@
 import argparse
 import random
 
+import numpy as np
 import torch
 import triton
 import triton.language as tl
-import numpy as np
-
 from vector_add import add, add_element2, add_element2_interleaved
 
 TRITON_BLOCK_SIZE = 512
