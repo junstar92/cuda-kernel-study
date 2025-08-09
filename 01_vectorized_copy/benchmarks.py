@@ -1,11 +1,10 @@
 import argparse
 import random
 
+import numpy as np
 import torch
 import triton
 import triton.language as tl
-import numpy as np
-
 from vectorized_copy import copy, vectorized_copy
 
 TRITON_BLOCK_SIZE = 512
