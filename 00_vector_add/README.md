@@ -2,7 +2,7 @@
 
 This document provides a basic introduction to CUDA programming using a simple vector addition kernel. We will cover this basic programming model, and then explore optimization technique like increasing workload per thread and using vectorized memory access.
 
-# The CUDA Programming Model: A Brief Overview
+## The CUDA Programming Model: A Brief Overview
 
 CUDA uses a model where the **host** (the CPU) controls the overall application and lanches computations on the **device** (the GPU). These computations are defined in special functions called **kernels**.
 
@@ -13,7 +13,7 @@ CUDA uses a model where the **host** (the CPU) controls the overall application 
 
 When launching a kernel, we define the dimensions of the grid and blocks, which determines the total number of threads.
 
-# A Basic CUDA Kernel: Vector Addition
+## A Basic CUDA Kernel: Vector Addition
 
 The most straightforward way to write a parallel vector addition is to assign one thread to compute the sum of one element from each input vector.
 
@@ -43,17 +43,17 @@ __global__ void add_kernel(T const *a, T const *b, T *out, size_t n) {
     - This formula gives each thread a unique global index (`idx`) across the entire grid, so it know which element of the vectors `a`, `b`, and `out` to handle.
 3. `if (idx < n)`: This boundary check is essential. We often launch a grid of threads that is slightly larger than the data size (for convenience, as the data size `n` might not be a perfect multiple of the block size). This `if` statement ensures that threads with an `idx` greater than or equal to `n` do nothing, preventing memory corruption.
 
-# Optimizing the Kernel: Vectorized Access
+## Optimizing the Kernel: Vectorized Access
 
 A common optimizing strategy is to make each thread to more work. This can reduce overhead. An even better optimization for memory-intensive tasks is to use **vectorized data types** to perform memory operations more efficiently.
 
-## Coalesced Memory Access
+### Coalesced Memory Access
 
 The most significant factor for performance in kernels like this is memory bandwidth. GPUs achieve maximum bandwidth when threads in a **warp** (a group of 32 threads) access consecutive memory locations simultaneously. This is called **coalesced memory access**. A single, wide memory transaction can service all 32 threads at once. If threads access scattered memory locations, the GPU may need to perform multiple, separate memory transactions, which is much slower.
 
 The `add_kernel` already uses a coalesced access pattern because adjacent threads (e.g., thread 0, 1, 2, ...) access adjacent memory locations (`a[0]`, `a[1]`, `a[2]`, ...).
 
-## Using Vectorized Types for Better Coalescing
+### Using Vectorized Types for Better Coalescing
 
 We can further improve memory efficiency by explicitly loading multiple data elements at once. For data types like `half` (16-bit float), we can use `half2`, which is a struct containing two `half` values. The GPU can load a `half2` vector (32 bits) in a single transaction.
 
@@ -78,7 +78,7 @@ __global__ void add_element2_kernel(half const *a, half const *b, half *out,
 
 Here, `reinterpret_cast<half2&>` tells the compiler to treat two consecutive `half` elements as a single `half2` unit. This allows the hardware to issue a single, wider memory instruction to load/store both elements, ensuring optimal use of memory bandwidth.
 
-## Performance Analysis: Why Didn't the Optimization Work?
+### Performance Analysis: Why Didn't the Optimization Work?
 
 You provided performance results from an `NVIDIA A6000 GPU`. This data reveals an important lesson in optimization: the theoretically "better" kernel is not always faster in practice.
 

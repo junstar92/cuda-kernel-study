@@ -4,7 +4,7 @@ In the world of GPU computing, performance is often limited not by computational
 
 This study explores one of the most effective techniques for maximizing memory bandwidth: **vectorized memory access**. We will analyze this by comparing two CUDA kernels that perform a simple memory copy. The first is a standard, element-by-element copy, and the second is an optimized version that uses vector data types to move large chunks of data at once. By examining this simple copy operation, we can isolate the impact of memory access patterns on performance.
 
-# Baseline Kernel: A Standard Coalesced Copy
+## Baseline Kernel: A Standard Coalesced Copy
 
 First, let's look at a standard implementation of a copy kernel. This approach assigns one thread to copy one element of data.
 
@@ -23,7 +23,7 @@ This kernel is a solid starting point. The line `size_t idx = blockDim.x * block
 
 Memory coalescing is a critical hardware feature where the GPU bundles the memory requests from all 32 threads in a warp into a single, large transaction. This is the most efficient way to access global memory. Therefore, this baseline kernel is already well-optimized from a coalescing perspective. Any further improvements must come from a different technique.
 
-# Optimized Kernel: Introducing Vectorized Memory Access
+## Optimized Kernel: Introducing Vectorized Memory Access
 
 To improve upon the baseline, we can modify the kernel to handle more data per thread. This is achieved by using vector data types, such as `float4`, which represents 4 floating-point numbers packed together.
 
@@ -62,7 +62,7 @@ Here's what's happening:
 
 The final part of the kernel is a simple loop to handle any leftover lements if the total array size isn't perfectly divisible by the vector size (4, in this case).
 
-# Performance Analysis
+## Performance Analysis
 
 The provided performance data compares the execution time of the stardard `copy_kernel` and the `vectorized_copy_kernel` in NVIDIA A6000 GPU (`fp16`), along with optimized libraries like PyTorch and Triton.
 

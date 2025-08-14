@@ -8,9 +8,9 @@ This walks through a systematic optimization of a CUDA transpose kernel. We firs
 
 > **Note**: For brevity, example kernels omit boundary checks and edge handling.
 
-# Problem Definition and Measurement
+## Problem Definition and Measurement
 
-## Objective and Primary Metric
+### Objective and Primary Metric
 
 We aim to maximize the performance of an out-of-place transpose for an $M \times N$ tensor of type $T$ (here, for `float16`). Performance is reported as **Effective Memory Bandwidth** (GB/s):
 
@@ -18,7 +18,7 @@ $$ \text{Effective BW (GB/s)} = \frac{\text{(bytes read + bytes written)}}{\text
 
 This metric reflects how efficiently the kernel utilizes the available memory bandwidth of the GPU. A full transpose reads and writes the entire matrix once, so total traffic is $2 \times M \times N \times \text{sizeof(T)} $.
 
-## Diagnostic Metrics via NVIDIA Nsight Compute
+### Diagnostic Metrics via NVIDIA Nsight Compute
 
 While effective bandwidth tells us the final performance, understanding the *why* behind performance changes requires peering into the GPU's hardware behavior. Using the NVIDIA Nsight Compute profiler, the following diagnostic metrics will be used to correlate code changes with their hardware-level impact:
 
@@ -28,7 +28,7 @@ While effective bandwidth tells us the final performance, understanding the *why
 - **Achieved Occupancy (%)**: Occupancy is the ratio of active warps per Streaming Multiprocessor (SM) to the maximum number of warps the SM can support. High occupancy is essential for hiding the high latency of global memory accesses, as it allows the SM's warp scheduler to switch to other ready warps while one is stalled waiting for data.
 - **Shared Memory Bank Conflict**: When using shared memory, multiple therads in a warp accessing different addresses in the same memory bank will cause those accesses to be serialized. Profiler counters, such as `smsp__warp_serialize.sum`, directly measure the number of cycles warps are stalled due to these conflicts.
 
-## Experimental Setup
+### Experimental Setup
 
 The key specifications of the test GPU and the list of kernel variants under study are summarized below:
 
@@ -43,7 +43,7 @@ The key specifications of the test GPU and the list of kernel variants under stu
     - `transpose_shm_v1_kernel`: Alternative shared memory indexing for tiling
     - `transpose_shm_v1_unroll_2_kernel`: Tiled approach with unrolling to increase work/thread
 
-# The Upper Bound: `copy_kernel`
+## The Upper Bound: `copy_kernel`
 
 To optimize effectively, we first need a target. For a memory-bound operation, the practical limit is the GPU’s sustained DRAM bandwidth. A simple, perfectly coalesced copy sets this upper bound:
 
@@ -60,13 +60,13 @@ __global__ void copy_kernel(T* out, T const* in, size_t const M,
 }
 ```
 
-## Analysis of Memory Access
+### Analysis of Memory Access
 
 The key to this kernel's performance lies in its memory access pattern. It uses a 1D grid of threads where each thread computes a unique linear index, `idx` (`m` and `n`). The core operation, `out[m * N + n] = in[m * N + n]`, is perfectly linear and sequential.
 
 In the CUDA execution model, threads are grouped into warps of 32. When a warp executes the copy instruction, thread `t` within the warp accesses `in[base_idx + t]` and writes to `out[base_idx + t]`. Because these 32 threads access 32 contiguous memory locations, the GPU's memory subsystem can **coalesce** these individual requests into a minimal number of large memory transactions. On modern architecture, these 32 requests for 4-byte floats (128 bytes total) can often be serviced by a single 128-byte cache line fetch from L2, representing the most efficient possible use of the memory bus.
 
-## Role as an Upper Bound
+### Role as an Upper Bound
 
 Because `copy_kernel` minimizes both instruction overhead and memory transaction overhead, its measured effective bandwidth serves as a practical upper bound for any kernel whose primary job is moving data. The theoretical peak memory bandwidth of a high-end GPU like the NVIDIA H100 is over 3000 GB/s, and a well-written copy can approach a significant fraction of this peak in practice.
 
@@ -85,11 +85,11 @@ We will measure the performance of all subsequent transpose kernels against this
 
 *These measurement (on RTX 6000) show the copy kernel approaching ~90% of the hardware's 768 GB/s bandwidth at large sizes, setting an upper bound for a fully optimized transpose.*
 
-# Naive Transpose
+## Naive Transpose
 
 The fundamental challenge in optimizing matrix transpose is the conflict between the operation’s data access pattern and the row-major memory layout used in C/C++ and CUDA. Efficient memory access on a GPU hinges on coalescing, where threads within a warp access contiguous memory locations. A naive transpose implementation inevitably breaks this pattern for either its read or its write operations.
 
-## `transpose_row_kernel`: Coalesced Reads, Scattered Writes
+### `transpose_row_kernel`: Coalesced Reads, Scattered Writes
 
 The first naive approach maps threads to the input matrix in row-major order (each warp reads a contiguous row from the input):
 
@@ -109,7 +109,7 @@ __global__ void transpose_row_kernel(T* out, T const* in, size_t const M,
 - **Loads**: Contiguous across a warp (coalesced).
 - **Stores**: Stride by $M$ (scattered, poor coalescing).
 
-## `transpose_col_kernel`: Scattered Reads, Coalesced Writes
+### `transpose_col_kernel`: Scattered Reads, Coalesced Writes
 
 The second approach maps threads to the output matrix in row-major order (each warp writes a contiguous row in the output):
 
@@ -129,7 +129,7 @@ __global__ void transpose_col_kernel(T* out, T const* in, size_t const M,
 - **Loads**: Stride by $N$ (scattered).
 - **Stores**: Contiguous across a row (coalesced).
 
-## Benchmark and Analysis
+### Benchmark and Analysis
 
 **Measured Bandwidth (GB/s)** - *Naive transpose variants vs. copy*
 | Matrix Size (N = M) | `copy_kernel` | `transpose_row_kernel` | `transpose_col_kernel` |
@@ -153,11 +153,11 @@ This explains the benchmark trends observed above. For small to medium matrix si
 
 *In summary, a naive transpose is __heavily limited by memory access patterns__. To make further gains, we need to tackle the strided access head-on*. [NVIDIA's own example](https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc) shows a naive transpose achieving only a fraction of copy bandwidth due to the large stride in either the read or write access. We next explore optimizations to mitigate these issues.
 
-# Unrolling and Vectorization
+## Unrolling and Vectorization
 
 With the primary bottleneck identified as non-coalesced memory access, our optimization journey continues with two foundational techniques: **loop unrolling** (to enhance instruction-level parallelism) and **vectorized I/O** (to perform wider memory transactions). These optimizations aim to reduce overhead and make better use of the GPU’s wide memory bus. However, as we’ll see, they are not cure-alls – especially when the underlying access pattern remains unfriendly to the memory system.
 
-## Loop Unrolling for Instruction-Level Parallelism (ILP)
+### Loop Unrolling for Instruction-Level Parallelism (ILP)
 
 Loop unrolling is a compiler optimization that reduces the overhead of loop control logic by replicating the loop body multiple times. This eliminates many branch instructions and loop index updates, creating a longer straight-line sequence of instructions. The GPU’s warp scheduler can then find more independent instructions to issue in parallel, helping hide the latency of arithmetic and memory operations. Our `transpose_col_unroll_4_kernel` demonstrates this principle by having each thread transpose four elements instead of one:
 
@@ -197,7 +197,7 @@ The `#pragma unroll` directive tells the compiler to fully unroll the loop, effe
 
 **Reality Check**: In our matrix transpose (a memory-bound problem), simple unrolling yielded only modest gains, and in some cases even hurt performance. For smaller matrices we did see a bump (e.g. for a 1024×1024 matrix, the unrolled kernel reached ~227 GB/s, eliminating the gap that existed with the naive version). But as we scaled up, the benefit evaporated and even reversed. By 2048×2048, `transpose_col_unroll_4` achieved ~221 GB/s versus ~282 GB/s for the naive column kernel – **slower than the baseline**. What happened is that once global memory access dominated the runtime, shaving off a few arithmetic instructions or loop overhead didn’t help much. The kernel was still performing the same number of non-coalesced global loads, so memory bandwidth remained the bottleneck. In fact, the extra index arithmetic introduced by unrolling added its own overhead. In short, unrolling improved ILP but did not address the fundamental issue of memory access pattern, so its impact on this memory-bound kernel was limited.
 
-## Vectorized I/O for Memory-Level Parallelism
+### Vectorized I/O for Memory-Level Parallelism
 
 Modern GPUs can load and store 32, 64, or 128 bytes per memory transaction. **Vectorized memory access** leverages this by using wider types (e.g., loading a `float4` instead of four `float`s) to move multiple values in one operation. The goal is to perform one 128-bit memory operation (`LDG.E.128` or `STG.E.128` in SASS) to move four 32-bit values, instead of four separate 32-bit instructions. This reduces the total number of memory transactions and can increase effective bandwidth.
 
@@ -258,7 +258,7 @@ Moreover, the vectorized approach introduced some new overhead of its own:
 
 In our case, reducing the number of memory instructions helped the *output* side but the *input* side was still incurring 4x more memory transactions than an ideal coalesced approach would. The result was that `transpose_col_unroll_n` didn't significantly improve overall throughput, and its additional overheads actually made it slower for very large matrices. This is a powerful reminder that optimizing at the instruction level only goes so far if you don't fix the data access pattern.
 
-# Tiling with Shared Memory for Coalesced Access
+## Tiling with Shared Memory for Coalesced Access
 
 The most effective way to tackle the strided access bottleneck is **tiling with shared memory**. By using fast on-chip shared memory as a manual scratchpad, we can reduce memory accesses to be fully coalesced. The tiled transpose strategy works as follows:
 
@@ -331,7 +331,7 @@ Even the initial tiled kernel (`transpose_shm_v0`) massively outperforms the nai
 
 However, careful readers will note the drop-off at N = 32768 (where performance falls to ~299 GB/s). This hints that something is still suboptimal at very large sizes. To investigate, we need to discuss an important detail: **shared memory bank conflicts**.
 
-## The Challenge of Shared Memory Bank Conflicts
+### The Challenge of Shared Memory Bank Conflicts
 
 Tiling solves the global memory access problem, but it introduces a new subtle bottleneck: **shared memory bank conflict**. Shared memory is divided into 32 banks (on NVIDIA GPUs, for 32-bit words), and consecutive 32-bit words map to consecutive banks. If threads in the **same warp** access different addresses that reside in the **same bank**, these accesses will serialize (the bank services one thread at a time). This serialization negates the speed of parallel shared memory access.
 
@@ -339,7 +339,7 @@ Unfortunately, a native transepose tile is a textbook case for bank conflicts. C
 
 In our initial tiled kernel (`transpose_shm_v0`), we indeed encountered this issue. Threads wrote to shared memory in row-major order (which was fine for the coalesced global load), but when they later read out the columns of the shared tile to write to global memory, those shared memory accesses suffered heavy bank conflicts. The warp's reads from shared memory were effectively serialized, and as a result the performance gain, while significant, was not as high as it could be. This was especially evident at very large matrix sizes (like 32768), where the benefit of tiling plateaued or dropped - indicating the shared memory itself had become a bottleneck.
 
-### Padding: The Classic Solution
+#### Padding: The Classic Solution
 
 The standard remedy for shared memory bank conflicts is **padding** the shared memory array. By adding an extra dummy column (or row) to the shared memory tile, we change the alignment of data in memory so that threads in a warp access different banks. In [NVIDIA's example](https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/#:~:text=For%20a%20shared%20memory%20tile,elements%20wide%20rather%20than%2032), changing a 32x32 tile to 33 columns eliminates the 32-way conflict. The code simply declares: `__shared__ float tile[TILE_DIM][TILE_DIM + 1];`. This one-column pad breaks the alignment that caused all threads to hit the same bank. Now, when thread `t` reads `tile[t][col]`, the address is `t * (TILE_DIM + 1) + col`, and the bank index becomes `(t * (TILE_DIM + 1) + col) mod 32`. Because `(TILE_DIM + 1)` is not a multiple of 32, each thread's access falls into a different bank. In practice, this removed the shared memory conflicts and brought transpose performance up to ~95% of the device's copy bandwidth in NVIDIA's example.
 
@@ -352,7 +352,7 @@ The difference between our v0 and v1 kernels in how they index the shared memory
 
 However, in our benchmarks the padded version (`transpose_shm_v1_kernel`) showed only a *marginal* improvement over the unpadded version.
 
-## Choosing an Optimal Tile Size (16x16 vs 32x16)
+### Choosing an Optimal Tile Size (16x16 vs 32x16)
 
 Tiling introduces two tunable parameters: the tile width (number of threads per row) and tile height (number of threads per column) in a block. A `32×32` tile might seem natural (cover a full warp per row and per column), but using 1024 threads per block can reduce occupancy and flexibility. We found that a `32×16` tile hits a sweet spot for this problem. Here’s why:
 
@@ -371,7 +371,7 @@ Tiling introduces two tunable parameters: the tile width (number of threads per 
 | 16384 | 490.218 | 494.378 | 494.611 |
 | 32768 | 298.921 | 434.508 | 433.565 |
 
-## Increasing Throughput with Block-Level Unrolling
+### Increasing Throughput with Block-Level Unrolling
 
 Finally, we also experimented with increasing the **work per thread block** to further boost throughput. The idea was to have each block transpose more than one tile, reusing the same threads to do extra work before finishing. Our `transpose_shm_v1_unroll_2_kernel` is an example: each thread block processes **two adjacent tiles** (each of size 32×16) in one go. This is accomplished by extending the indices so that after handling the first tile, the same threads immediately load a second tile from a neighboring region of the matrix and transpose it as well. We allocate a larger shared memory array to hold 2×(32×16) elements (with padding as needed). By unrolling the block’s work in this manner, we **amortize overheads** – fewer kernel launches and loop iterations are needed per matrix, and index calculations or synchronizations are reduced per element processed. In our results, this block-level unrolling gave another small bump in throughput. Essentially, it improves the ratio of useful memory operations to overhead (arithmetic and synchronization), pushing us closer to the hardware’s peak bandwidth.
 
@@ -414,7 +414,7 @@ __global__ void transpose_shm_v1_unroll_2_kernel(T* out, T const* in,
 | 16384 | 490.218 | 494.378 | 523.813 |
 | 32768 | 298.921 | 434.508 | 476.301 |
 
-# Conclusion and Future Work
+## Conclusion and Future Work
 
 Through this step-by-step optimization, we transformed a naive GPU transpose that achieved barely 20~40% of peak bandwidth into highly optimized version reaching about 70% of peak memory bandwidth on the RTX A6000. By diagnosing the bottlenecks at each stage, we learned the following lessons:
 

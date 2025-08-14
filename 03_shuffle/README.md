@@ -8,7 +8,7 @@ When working with CUDA, we often need threads within the same warp to exchange d
 
 > **Warp Basics**: A warp is a group of 32 threads that execute in lockstep. Each thread in a warp is called a **lane**, identified by a lane index from 0 to 31. In code, you can determine the lane index as `lane_id = threadIdx.x % 32` and the warp ID as `warp_id = threadIdx.x / 32`. Understanding lane indices is useful when using shuffle operations (for example, to specify which thread's value to access).
 
-# What Are Warp Shuffle Intrinsics?
+## What Are Warp Shuffle Intrinsics?
 
 Warp shuffle intrinsics are special CUDA built-in functions that **exchange a variable between threads within a warp**. Unlike using shared memory and `__syncthreads()` for communication, shuffle operations move data directly between registers of threads, significantly reducing latency and avoiding block-wide synchronization. Each thread can exchange 4 or 8 bytes of data (depending on the data type) simultaneously with others in the warp. This capability is supported on devices of **compute capability 5.0** (Maxwell) or higher.
 
@@ -21,7 +21,7 @@ Key characteristics of shuffle intrinsics include:
 
 With those general rules in mind, let's look at each of the four shuffle intrinsics and what they do.
 
-# The Four Shuffle Operations
+## The Four Shuffle Operations
 
 CUDA provides four variants of shuffle intrinsics, each implementing a different pattern of data exchange among warp lanes
 
@@ -69,7 +69,7 @@ This shuffle uses a **bitwise XOR** of the lane index to choose the source. Each
 
 In summary, `__shfl_xor_sync` is the most flexible shuffle and often the most powerful for parallel algorithms, as it can perform the pairwise exchanges needed for many divide-and-conquer strategies.
 
-# Why Use Shuffle Intrinsics?
+## Why Use Shuffle Intrinsics?
 
 The main benefit of warp shuffle functions is performance. They allow threads to share data without the overhead of shared memory or block-level synchronization. In scenarios where only a warp's threads need to cooperate (which is often the case for small reductions, prefix sums, shuffles, etc.), using these intrinsics can drastically reduce latency. By avoiding `__syncthreads()` and shared memory, you eliminate unnecessary stalling of other warps and extra memory traffic.
 
@@ -79,6 +79,6 @@ Another use case is **transposing data within a warp** or rearranging elements. 
 
 - [*Unlock Warp-Level Performance: DeepSeek's Practical Techniques for Specialized GPU Tasks*](https://medium.com/@amin32846/unlock-warp-level-performance-deepseeks-practical-techniques-for-specialized-gpu-tasks-a6cf0c68a178)
 
-# Conclusion
+## Conclusion
 
 CUDA's shuffle intrinsics are powerful tools for GPU developers, enabling fast data exchanges at the warp level. They should be used when threads within the same warp need to share data or perform collective operations like reductions, scans, or broadcasts. By leveraging these intrinsics, experienced programmers can write warp-synchronous algorithms that avoid unnecessary memory accesses and block-level synchronization, leading to more efficient GPU kernels. Just remember to use the `_sync` versions with proper mask (often `0xFFFFFFFF` for a full warp) and ensure all intended threads participate in lockstep. With these in hand, you can implement clever warp-level routines that make that the most of NVIDIA GPU architecture - achieving speed-ups by communicating through the warp's internal network rather than lower memory.

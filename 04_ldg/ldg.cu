@@ -2,7 +2,7 @@
 #include <torch/extension.h>
 
 template <typename T>
-__global__ void load_without_ldg_kernel(T* output, T const* input, size_t n) {
+__global__ void load_without_ldg_kernel(T* output, T* input, size_t n) {
   size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
 
   if (idx < n) {
