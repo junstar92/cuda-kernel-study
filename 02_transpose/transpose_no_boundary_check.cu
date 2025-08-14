@@ -1,24 +1,17 @@
-#undef __CUDA_NO_HALF_OPERATORS__
-#undef __CUDA_NO_HALF_CONVERSIONS__
-#undef __CUDA_NO_HALF2_OPERATORS__
-#undef __CUDA_NO_BFLOAT16_OPERATORS__
-#undef __CUDA_NO_BFLOAT16_CONVERSIONS__
-#undef __CUDA_NO_BFLOAT162_OPERATORS__
-
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <torch/extension.h>
 
-// upper-bound - all memory accesses are coalesced
+// The performance upper bound: all memory accesses are perfectly coalesced
 template <typename T>
 __global__ void copy_kernel(T* out, T const* in, size_t const M,
                             size_t const N) {
   size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
+  size_t m = idx / N;
+  size_t n = idx % N;
 
-  if (idx < M * N) {
-    out[idx] = in[idx];
-  }
+  out[m * N + n] = in[m * N + n];
 }
 
 template <typename T, size_t BLOCK_SIZE = 256>
@@ -28,7 +21,7 @@ void copy(T* out, T const* in, size_t const M, size_t const N) {
   copy_kernel<<<grid, BLOCK_SIZE>>>(out, in, M, N);
 }
 
-// row-read column-write
+// Reads are coalesced (row-wise), but writes are scattered across columns
 template <typename T>
 __global__ void transpose_row_kernel(T* out, T const* in, size_t const M,
                                      size_t const N) {
@@ -36,9 +29,7 @@ __global__ void transpose_row_kernel(T* out, T const* in, size_t const M,
   size_t m = idx / N;
   size_t n = idx % N;
 
-  if (m < M && n < N) {
-    out[n * M + m] = in[m * N + n];
-  }
+  out[n * M + m] = in[m * N + n];
 }
 
 template <typename T, size_t BLOCK_SIZE = 256>
@@ -48,7 +39,8 @@ void transpose_row(T* out, T const* in, size_t const M, size_t const N) {
   transpose_row_kernel<<<grid, BLOCK_SIZE>>>(out, in, M, N);
 }
 
-// column-read row-write
+// Reads are scattered across a column, but writes are coalesced (row-wise in
+// output)
 template <typename T>
 __global__ void transpose_col_kernel(T* out, T const* in, size_t const M,
                                      size_t const N) {
@@ -56,9 +48,7 @@ __global__ void transpose_col_kernel(T* out, T const* in, size_t const M,
   size_t m = idx % M;
   size_t n = idx / M;
 
-  if (m < M && n < N) {
-    out[n * M + m] = in[m * N + n];
-  }
+  out[n * M + m] = in[m * N + n];
 }
 
 template <typename T, size_t BLOCK_SIZE = 256>
@@ -68,34 +58,20 @@ void transpose_col(T* out, T const* in, size_t const M, size_t const N) {
   transpose_col_kernel<<<grid, BLOCK_SIZE>>>(out, in, M, N);
 }
 
-// column-read row-write unrolling 4
+// Each thread processes 4 elements; loop is unrolled for ILP
 template <typename T>
 __global__ void transpose_col_unroll_4_kernel(T* out, T const* in, size_t M,
                                               size_t N) {
   constexpr size_t unroll_factor = 4;
   size_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  size_t idx = tid * unroll_factor;
 
-  if (tid < M * N / unroll_factor) {
-    size_t idx = tid * unroll_factor;
+#pragma unroll
+  for (size_t i = 0; i < unroll_factor; i++) {
+    size_t m = (idx + i) % M;
+    size_t n = (idx + i) / M;
 
-#pragma unroll unroll_factor
-    for (size_t i = 0; i < unroll_factor; i++) {
-      size_t m = (idx + i) % M;
-      size_t n = (idx + i) / M;
-
-      out[n * M + m] = in[m * N + n];
-    }
-
-    int remainder = (M * N) % unroll_factor;
-    if (tid == M * N / unroll_factor - 1 && remainder) {
-      while (remainder) {
-        idx = M * N - remainder--;
-        size_t m = idx % M;
-        size_t n = idx / M;
-
-        out[n * M + m] = in[m * N + n];
-      }
-    }
+    out[n * M + m] = in[m * N + n];
   }
 }
 
@@ -107,37 +83,24 @@ void transpose_col_unroll_4(T* out, T const* in, size_t const M,
   transpose_col_unroll_4_kernel<<<grid, BLOCK_SIZE>>>(out, in, M, N);
 }
 
-// column-read row-vectorized-write unrolling n
+// Vectorized store (float4) to reduce global memory transactions
 template <typename T>
 __global__ void transpose_col_unroll_n_kernel(T* out, T const* in, size_t M,
                                               size_t N) {
   constexpr size_t unroll_factor = 128 / sizeof(T) / 8;
   size_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+  size_t idx = tid * unroll_factor;
 
-  if (tid < M * N / unroll_factor) {
-    size_t idx = tid * unroll_factor;
+  T tmp[unroll_factor];
+#pragma unroll
+  for (size_t i = 0; i < unroll_factor; i++) {
+    size_t m = (idx + i) % M;
+    size_t n = (idx + i) / M;
 
-    T tmp[unroll_factor];
-#pragma unroll unroll_factor
-    for (size_t i = 0; i < unroll_factor; i++) {
-      size_t m = (idx + i) % M;
-      size_t n = (idx + i) / M;
-
-      tmp[i] = in[m * N + n];
-    }
-    reinterpret_cast<float4&>(out[idx]) = *reinterpret_cast<float4*>(tmp);
-
-    int remainder = (M * N) % unroll_factor;
-    if (tid == M * N / unroll_factor - 1 && remainder) {
-      while (remainder) {
-        idx = M * N - remainder--;
-        size_t m = idx % M;
-        size_t n = idx / M;
-
-        out[n * M + m] = in[m * N + n];
-      }
-    }
+    tmp[i] = in[m * N + n];  // scattered global loads
   }
+  reinterpret_cast<float4&>(out[idx]) =
+      *reinterpret_cast<float4*>(tmp);  // vectorized store
 }
 
 template <typename T, size_t BLOCK_SIZE = 256>
@@ -149,30 +112,28 @@ void transpose_col_unroll_n(T* out, T const* in, size_t const M,
   transpose_col_unroll_n_kernel<<<grid, BLOCK_SIZE>>>(out, in, M, N);
 }
 
-// row-read row-write with shared memory
+// Version 0: Shared-memory tiling (potential bank conflicts on transpose)
 template <typename T, size_t TILE_M = 16, size_t TILE_N = 16, size_t PAD_N = 0>
-__global__ void transpose_shm_kernel(T* out, T const* in, size_t const M,
-                                     size_t const N) {
+__global__ void transpose_shm_v0_kernel(T* out, T const* in, size_t const M,
+                                        size_t const N) {
   __shared__ T smem[(TILE_N + PAD_N) * TILE_M];
 
   size_t in_m = blockDim.y * blockIdx.y + threadIdx.y;
   size_t in_n = blockDim.x * blockIdx.x + threadIdx.x;
-
+  // Compute output indices corresponding to transposed block
   size_t block_idx = blockDim.x * threadIdx.y + threadIdx.x;
   size_t block_row = block_idx / blockDim.y;
   size_t block_col = block_idx % blockDim.y;
   size_t out_m = blockDim.y * blockIdx.y + block_col;
   size_t out_n = blockDim.x * blockIdx.x + block_row;
-
-  smem[threadIdx.y * TILE_N + threadIdx.x] =
-      (in_m < M && in_n < N) ? in[in_m * N + in_n] : T{0.f};
+  // Coalesced load from global to shared (row-major in shared)
+  smem[threadIdx.y * TILE_N + threadIdx.x] = in[in_m * N + in_n];
   __syncthreads();
-
-  if (out_m < M && out_n < N) {
-    out[out_n * M + out_m] = smem[block_col * TILE_N + block_row];
-  }
+  // Each thread now reads a column from shared and write to global (transposed)
+  out[out_n * M + out_m] = smem[block_col * TILE_N + block_row];
 }
 
+// Version 1: Shared-memory tiling (reindexed to reduce bank conflicts)
 template <typename T, size_t TILE_M = 16, size_t TILE_N = 16, size_t PAD_M = 0>
 __global__ void transpose_shm_v1_kernel(T* out, T const* in, size_t const M,
                                         size_t const N) {
@@ -180,58 +141,44 @@ __global__ void transpose_shm_v1_kernel(T* out, T const* in, size_t const M,
 
   size_t in_m = blockDim.y * blockIdx.y + threadIdx.y;
   size_t in_n = blockDim.x * blockIdx.x + threadIdx.x;
-
+  // Transposed indexing for shared memory
   size_t block_idx = blockDim.x * threadIdx.y + threadIdx.x;
   size_t block_row = block_idx / blockDim.y;
   size_t block_col = block_idx % blockDim.y;
   size_t out_m = blockDim.y * blockIdx.y + block_col;
   size_t out_n = blockDim.x * blockIdx.x + block_row;
-
-  smem[threadIdx.x * TILE_M + threadIdx.y] =
-      (in_m < M && in_n < N) ? in[in_m * N + in_n] : T{0.f};
+  // Colesced load from global, but store into shared in column-major order
+  smem[threadIdx.x * TILE_M + threadIdx.y] = in[in_m * N + in_n];
   __syncthreads();
-
-  if (out_m < M && out_n < N) {
-    out[out_n * M + out_m] = smem[block_row * TILE_M + block_col];
-  }
+  // Coalesced write from shared (read row-major from shared)
+  out[out_n * M + out_m] = smem[block_row * TILE_M + block_col];
 }
 
-// row-read row-write with shared memory + unrolling 2
-template <typename T, size_t TILE_M = 16, size_t TILE_N = 16, size_t PAD_N = 0>
-__global__ void transpose_shm_unroll_2_kernel(T* out, T const* in,
-                                              size_t const M, size_t const N) {
+// Tiled transpose (32x16 tile) + block-level unrolling (process 2 tiles per
+// block)
+template <typename T, size_t TILE_M = 32, size_t TILE_N = 16>
+__global__ void transpose_shm_v1_unroll_2_kernel(T* out, T const* in,
+                                                 size_t const M,
+                                                 size_t const N) {
   __shared__ T smem[TILE_N * 2 * TILE_M];
 
   size_t in_m = blockDim.y * blockIdx.y + threadIdx.y;
   size_t in_n = 2 * blockDim.x * blockIdx.x + threadIdx.x;
-
+  // Calculate indices for two tiles
   size_t block_idx = blockDim.x * threadIdx.y + threadIdx.x;
   size_t block_row = block_idx / blockDim.y;
   size_t block_col = block_idx % blockDim.y;
   size_t out_m = blockDim.y * blockIdx.y + block_col;
   size_t out_n = 2 * blockDim.x * blockIdx.x + block_row;
-
-  smem[threadIdx.y * TILE_N * 2 + threadIdx.x] =
-      (in_m < M && in_n < N) ? in[in_m * N + in_n] : T{0.f};
+  // Load two tiles into shared memory (coalesced global loads)
+  smem[threadIdx.y * TILE_N * 2 + threadIdx.x] = in[in_m * N + in_n];
   smem[threadIdx.y * TILE_N * 2 + threadIdx.x + TILE_N] =
-      (in_m < M && (in_n + TILE_N) < N) ? in[in_m * N + in_n + TILE_N] : T{0.f};
+      in[in_m * N + in_n + TILE_N];
   __syncthreads();
-
-  if (out_m < M && out_n < N) {
-    out[out_n * M + out_m] = smem[block_col * 2 * TILE_N + block_row];
-    if (out_n + TILE_N < N) {
-      out[(out_n + blockDim.x) * M + out_m] =
-          smem[block_col * 2 * TILE_N + block_row + TILE_N];
-    }
-  }
-
-  if ((N % 2) &&
-      ((N + 2 * blockDim.x - 1) / (2 * blockDim.x)) == (gridDim.x + 1) &&
-      (blockIdx.x == gridDim.x - 1) && threadIdx.x == 0) {
-    size_t m = blockDim.y * blockIdx.y + threadIdx.y;
-    size_t n = 2 * blockDim.x * gridDim.x;
-    out[n * M + m] = in[m * N + n];
-  }
+  // Store transposed tiles from shared to global (coalesced global stores)
+  out[out_n * M + out_m] = smem[block_col * 2 * TILE_N + block_row];
+  out[(out_n + blockDim.x) * M + out_m] =
+      smem[block_col * 2 * TILE_N + block_row + TILE_N];
 }
 
 template <typename T>
@@ -241,36 +188,37 @@ void transpose_shm(T* out, T const* in, size_t const M, size_t const N,
     constexpr size_t TILE_M = 16, TILE_N = 16;
     dim3 block(TILE_N, TILE_M);
     dim3 grid{(N + block.x - 1) / block.x, (M + block.y - 1) / block.y};
-    transpose_shm_kernel<T, TILE_M, TILE_N><<<grid, block>>>(out, in, M, N);
+    transpose_shm_v0_kernel<T, TILE_M, TILE_N><<<grid, block>>>(out, in, M, N);
   } else if (ver == 1) {
     constexpr size_t TILE_M = 16, TILE_N = 16;
     dim3 block(TILE_N, TILE_M);
     dim3 grid{(N + block.x - 1) / block.x, (M + block.y - 1) / block.y};
     transpose_shm_v1_kernel<T, TILE_M, TILE_N><<<grid, block>>>(out, in, M, N);
   } else if (ver == 2) {
+    // v0 + (32, 16) tile
+    constexpr size_t TILE_M = 32, TILE_N = 16;
+    dim3 block(TILE_N, TILE_M);
+    dim3 grid{(N + block.x - 1) / block.x, (M + block.y - 1) / block.y};
+    transpose_shm_v0_kernel<T, TILE_M, TILE_N><<<grid, block>>>(out, in, M, N);
+  } else if (ver == 3) {
+    // v1 + (32, 16) tile
     constexpr size_t TILE_M = 32, TILE_N = 16;
     dim3 block(TILE_N, TILE_M);
     dim3 grid{(N + block.x - 1) / block.x, (M + block.y - 1) / block.y};
     transpose_shm_v1_kernel<T, TILE_M, TILE_N><<<grid, block>>>(out, in, M, N);
-  } else if (ver == 3) {
-    // ver 0 + padding 2
-    constexpr size_t TILE_M = 32, TILE_N = 16;
-    dim3 block(TILE_N, TILE_M);
-    dim3 grid{(N + block.x - 1) / block.x, (M + block.y - 1) / block.y};
-    transpose_shm_kernel<T, TILE_M, TILE_N, 2><<<grid, block>>>(out, in, M, N);
   } else if (ver == 4) {
-    // ver 1 + padding 2
+    // v1 + (32, 16) tile + padding 1
     constexpr size_t TILE_M = 32, TILE_N = 16;
     dim3 block(TILE_N, TILE_M);
     dim3 grid{(N + block.x - 1) / block.x, (M + block.y - 1) / block.y};
-    transpose_shm_v1_kernel<T, TILE_M, TILE_N, 2>
+    transpose_shm_v1_kernel<T, TILE_M, TILE_N, 1>
         <<<grid, block>>>(out, in, M, N);
   } else if (ver == 5) {
-    // unroll 2
+    // v1 + (32, 16) tile + unroll 2
     constexpr size_t TILE_M = 32, TILE_N = 16;
     dim3 block(TILE_N, TILE_M);
     dim3 grid((N / 2 + block.x - 1) / block.x, (M + block.y - 1) / block.y);
-    transpose_shm_unroll_2_kernel<T, TILE_M, TILE_N>
+    transpose_shm_v1_unroll_2_kernel<T, TILE_M, TILE_N>
         <<<grid, block>>>(out, in, M, N);
   }
 }

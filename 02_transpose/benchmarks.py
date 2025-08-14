@@ -4,7 +4,14 @@ import random
 import numpy as np
 import torch
 import triton
-from transpose import copy, transpose_col, transpose_col_unroll_4, transpose_col_unroll_n, transpose_row, transpose_shm
+from transpose_no_boundary_check import (
+    copy,
+    transpose_col,
+    transpose_col_unroll_4,
+    transpose_col_unroll_n,
+    transpose_row,
+    transpose_shm,
+)
 
 DEVICE = torch.device("cuda", index=0)
 
@@ -47,9 +54,10 @@ class DtypeAction(argparse.Action):
             "transpose_col_unroll_n",
             "transpose_shm_v0",
             "transpose_shm_v1",
-            "transpose_shm_v2",
-            # "transpose_shm_v3",
-            "transpose_shm_unroll_2",
+            "transpose_shm_v0_2",
+            "transpose_shm_v1_2",
+            "transpose_shm_v1_3",
+            "transpose_shm_v1_unroll_2",
         ],
         line_names=[
             "Copy",
@@ -59,9 +67,10 @@ class DtypeAction(argparse.Action):
             "Unroll n",
             "Smem V0 (16x16)",
             "Smem V1 (16x16)",
+            "Smem V0 (32x16)",
             "Smem V1 (32x16)",
-            # "Smem (32x16) Pad",
-            "Smem Unroll 2",
+            "Smem V1 (32x16, Pad)",
+            "Smem V1 (32x16, Unroll 2)",
         ],
         styles=[
             ("red", "-"),
@@ -73,10 +82,11 @@ class DtypeAction(argparse.Action):
             ("pink", "--"),
             ("gray", "--"),
             ("olive", "--"),
-            # ("cyan", "--"),
+            ("cyan", "--"),
+            ("blue", "-"),
         ],
-        ylabel="Time (ms)",
-        plot_name="Transpose Performance (ms)",
+        ylabel="Bandwidth (GB/s)",
+        plot_name="Transpose Bandwidth (GB/s)",
         args={},
     )
 )
@@ -102,16 +112,19 @@ def benchmark(N, provider, dtype):
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 0), quantiles=quantiles)
     if provider == "transpose_shm_v1":
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 1), quantiles=quantiles)
-    if provider == "transpose_shm_v2":
+    if provider == "transpose_shm_v0_2":
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 2), quantiles=quantiles)
-    # if provider == "transpose_shm_v3":
-    #     ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 3), quantiles=quantiles)
-    # if provider == "transpose_shm_v4":
-    #     ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 4), quantiles=quantiles)
-    if provider == "transpose_shm_unroll_2":
+    if provider == "transpose_shm_v1_2":
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 3), quantiles=quantiles)
+    if provider == "transpose_shm_v1_3":
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 4), quantiles=quantiles)
+    if provider == "transpose_shm_v1_unroll_2":
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: transpose_shm(out, x, 5), quantiles=quantiles)
 
-    return ms, min_ms, max_ms
+    def get_bandwidth_gbs(ms: float) -> float:
+        return (2 * N * N * dtype.itemsize) / (ms * 1e6)
+
+    return get_bandwidth_gbs(ms), get_bandwidth_gbs(max_ms), get_bandwidth_gbs(min_ms)
 
 
 if __name__ == "__main__":

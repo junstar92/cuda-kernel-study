@@ -1,5 +1,5 @@
 import torch
-from transpose import (
+from transpose_no_boundary_check import (
     copy,
     transpose_col,
     transpose_col_unroll_4,
@@ -9,7 +9,7 @@ from transpose import (
 )
 
 if __name__ == "__main__":
-    M, N = 2**11 + 1, 2**12 + 1
+    M, N = 1024, 2048
     x = torch.randn((M, N), dtype=torch.float16, device="cuda")
 
     out = torch.empty_like(x)
@@ -18,50 +18,40 @@ if __name__ == "__main__":
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_row(out, x)
-    print("transpose row")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_col(out, x)
-    print("transpose col")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_col_unroll_4(out, x)
-    print("transpose col unroll 4")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_col_unroll_n(out, x)
-    print("transpose col unroll n")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_shm(out, x, 0)
-    print("transpose smem")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_shm(out, x, 1)
-    print("transpose smem v1")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_shm(out, x, 2)
-    print("transpose smem v2")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_shm(out, x, 3)
-    print("transpose smem v3")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_shm(out, x, 4)
-    print("transpose smem v4")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
 
     out = torch.zeros((N, M), dtype=torch.float16, device="cuda")
     transpose_shm(out, x, 5)
-    print("transpose smem v5")
     assert torch.allclose(x.T, out, atol=0.0, rtol=0.0)
