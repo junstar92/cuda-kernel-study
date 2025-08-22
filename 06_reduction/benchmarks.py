@@ -68,7 +68,7 @@ def benchmark(N, provider, dtype):
         x = torch.randint(-100, 100, (N,), dtype=dtype)
     out = torch.tensor(0, dtype=dtype)
 
-    quantiles = [0.5, 0.2, 0.8]
+    quantiles = [0.5, 0.1, 0.9]
     if provider == "torch":
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: x.sum(), quantiles=quantiles)
     if provider == "atomic_global":

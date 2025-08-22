@@ -7,8 +7,8 @@
 
 namespace cg = cooperative_groups;
 
-// This kernel uses atomic operations to accumulate the individual elements
-// in a single global memory.
+// This kernel uses atomicAdd operations to accumulate each input element into a
+// single global output variable.
 template <typename T>
 __global__ void reduction_atomic_kernel(T* out, T const* in, size_t const n) {
   size_t const idx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -18,10 +18,10 @@ __global__ void reduction_atomic_kernel(T* out, T const* in, size_t const n) {
   }
 }
 
-// Each block can accumulate partial results in isolated shared memory.
-// The final result is then accumulated into the global memory.
-// This approach reduces the number of atomic operations, which can be a
-// bottleneck.
+// Each block accumulates a partial sum in its shared memory, then the block’s
+// result is atomically added to the global output. By reducing global atomic
+// operations (one per block instead of one per element), this approach
+// alleviates the atomic contention bottleneck.
 template <typename T>
 __global__ void reduction_atomic_shm_kernel(T* out, T const* in,
                                             size_t const n) {
@@ -43,8 +43,9 @@ __global__ void reduction_atomic_shm_kernel(T* out, T const* in,
   }
 }
 
-// This kernel uses shared memory to accumulate results within each block.
-// The final result is then accumulated into the global memory.
+// This kernel performs a block-wide reduction using shared memory. Each block’s
+// threads iteratively halve the active range and sum values, and the final
+// block result is atomically added to the global output.
 template <typename T>
 __global__ void reduce_shm_kernel(T* out, T const* in, size_t const n) {
   extern __shared__ char smem[];
@@ -65,8 +66,10 @@ __global__ void reduce_shm_kernel(T* out, T const* in, size_t const n) {
   }
 }
 
-// This kernel uses warp-level primitives to reduce the number of threads
-// in last 5 iterations of the reduction.
+// This kernel uses warp-level shuffle operations to complete the final steps of
+// the reduction once 32 partial values remain. Using __shfl_sync intrinsics
+// replaces the last 5 iterations of the shared-memory reduction loop, halving
+// the number of active threads at each step without additional __syncthreads.
 template <typename T>
 __global__ void reduce_shuffle(T* out, T const* in, size_t const n) {
   extern __shared__ char smem[];
@@ -102,9 +105,11 @@ __global__ void reduce_shuffle(T* out, T const* in, size_t const n) {
   }
 }
 
-// This kernel uses unrolling to optimize the last 6 iterations of the
-// reduction in shared memory. It is similar to `reduce_shuffle`, but it
-// unrolls the last 6 iterations instead of using warp-level primitives.
+// This kernel manually unrolls the final 6 iterations of the reduction loop in
+// shared memory (reducing 64 values down to 1). It is similar in intent to
+// `reduce_shuffle`, but instead of using warp intrinsics, it explicitly
+// performs the last 6 add operations in code (using volatile memory to ensure
+// correctness).
 template <typename T>
 __global__ void reduce_unroll(T* out, T const* in, size_t const n) {
   extern __shared__ char smem[];
@@ -139,8 +144,11 @@ __global__ void reduce_unroll(T* out, T const* in, size_t const n) {
   }
 }
 
-// This kernel uses cooperative groups to reduce the number of threads
-// in the last 6 iterations of the reduction.
+// This kernel uses cooperative groups to perform the final reduction at warp
+// level when 64 partial values remain. It partitions the block into warps and
+// uses `cg::reduce` on a 32-thread warp (combining values from two warps),
+// eliminating the need for manual unrolling or explicit shuffle intrinsics in
+// the last 6 steps.
 template <typename T>
 __global__ void reduce_with_cg(T* out, T const* in, size_t const n) {
   extern __shared__ char smem[];
@@ -169,6 +177,11 @@ __global__ void reduce_with_cg(T* out, T const* in, size_t const n) {
   }
 }
 
+// This kernel is a variant of `reduce_with_cg` that unrolls the input by a
+// factor of 2: each thread sums two elements from the input. By processing two
+// elements per thread, it halves the number of threads (and iterations) needed
+// before the cooperative groups reduction handles the final 64 values similarly
+// to `reduce_with_cg`.
 template <typename T>
 __global__ void reduce_with_cg_unroll_2(T* out, T const* in, size_t const n) {
   extern __shared__ char smem[];
@@ -204,6 +217,10 @@ __global__ void reduce_with_cg_unroll_2(T* out, T const* in, size_t const n) {
   }
 }
 
+// This kernel uses the CUB library’s BlockReduce to sum values within each
+// block. CUB’s optimized reduction routine computes the block’s partial sum
+// (stored in shared memory), and the thread 0 then atomically adds that partial
+// sum to the global output.
 template <typename T, size_t BLOCK_SIZE>
 __global__ void reduction_cub_kernel(T* out, T const* in, size_t const n) {
   using BlockReduce = cub::BlockReduce<T, BLOCK_SIZE>;
