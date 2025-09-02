@@ -7,6 +7,7 @@
 - [LDG](./04_ldg)
 - [Shared Memory](./05_shared_memory)
 - [Parallel Reduction](./06_reduction)
+- [SGEMM](./07_sgemm)
 
 ## References
 
