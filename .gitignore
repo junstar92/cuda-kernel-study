@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.python-version
 
 # C extensions
 *.so
@@ -217,6 +218,9 @@ models
 # TensorRT engine files
 *.engine
 
+# Local git worktrees
+.worktrees/
+
 # PyTorch model files
 *.pt
 *.pth
@@ -292,4 +296,9 @@ dkms.conf
 *.fatbin
 
 # Others
+.codex
 */results
+*/artifacts
+*.ncu-rep
+*.nsys-rep
+XX_*
