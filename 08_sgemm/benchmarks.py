@@ -3,17 +3,9 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import sgemm
 import torch
-from sgemm import (
-    sgemm_64x64x8_1d,
-    sgemm_128x128x8_8x8x1,
-    sgemm_naive,
-    sgemm_shmem,
-    sgemm_vec_128x128x8_8x8x1,
-    sgemm_vec_128x128x8_8x8x1_pad,
-    sgemm_vec_128x128x16_8x8x1_pad,
-    sgemm_warptiling_128x128x16_64x32x1_8x8x1,
-)
+from kernels import KERNELS
 
 DEVICE = torch.device("cuda", index=0)
 
@@ -47,20 +39,12 @@ class KernelInfo:
 class BenchmarkRunner:
     def __init__(self, config: BenchmarkConfig):
         self.config = config
-        self.kernels = [
-            KernelInfo("torch", torch.matmul),
-            KernelInfo("naive", sgemm_naive),
-            KernelInfo("shmem", sgemm_shmem),
-            KernelInfo("shmem_64x64x8_1d", sgemm_64x64x8_1d),
-            KernelInfo("shmem_128x128x8_8x8x1", sgemm_128x128x8_8x8x1),
-            KernelInfo("sgemm_vec_128x128x8_8x8x1", sgemm_vec_128x128x8_8x8x1),
-            KernelInfo("sgemm_vec_128x128x8_8x8x1_pad", sgemm_vec_128x128x8_8x8x1_pad),
-            KernelInfo("sgemm_vec_128x128x16_8x8x1_pad", sgemm_vec_128x128x16_8x8x1_pad),
-            KernelInfo(
-                "sgemm_warptiling_128x128x16_64x32x1_8x8x1",
-                sgemm_warptiling_128x128x16_64x32x1_8x8x1,
-            ),
-        ]
+        # Start with torch baseline
+        self.kernels = [KernelInfo("torch", torch.matmul)]
+        # Auto-load all kernels from configuration
+        for kernel in KERNELS:
+            func = getattr(sgemm, kernel["python_name"])
+            self.kernels.append(KernelInfo(kernel["name"], func))
 
     def run_all_benchmarks(self) -> list[BenchmarkResult]:
         results = []
@@ -190,4 +174,4 @@ def main():
 
 if __name__ == "__main__":
     df = main()
-    df.to_csv("sgemm_performance.csv")
+    # df.to_csv("sgemm_performance.csv")
