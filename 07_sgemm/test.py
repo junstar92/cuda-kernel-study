@@ -1,62 +1,101 @@
 import torch
 from sgemm import (
-    sgemm_64x64x8_1d,
-    sgemm_128x128x8_8x8x1,
-    sgemm_naive,
-    sgemm_shmem,
-    sgemm_vec_128x128x8_8x8x1,
-    sgemm_vec_128x128x8_8x8x1_pad,
-    sgemm_vec_128x128x16_8x8x1_pad,
-    sgemm_warptiling_128x128x16_64x32x1_8x8x1,
+    sgemm_blocktiling_1d_64x64x8_8_no_pad,
+    sgemm_blocktiling_1d_64x64x8_8_pad4,
+    sgemm_blocktiling_1d_64x64x8_16_pad4,
+    sgemm_blocktiling_1d_128x128x8_64_pad4,
+    sgemm_blocktiling_1d_128x128x16_64_pad4,
+    sgemm_blocktiling_2d_128x128x8_8x8_pad4,
+    sgemm_blocktiling_2d_128x128x16_8x8_pad4,
+    sgemm_blocktiling_2d_vec4_128x128x8_8x8_pad4,
+    sgemm_blocktiling_2d_vec4_128x128x16_8x8_pad4,
+    sgemm_cutlass_simt_128x128x8_32x64x8_2stage,
+    sgemm_cutlass_simt_128x128x8_64x32x8_2stage,
+    sgemm_cutlass_universal_simt_128x256_8x4,
+    sgemm_naive_col,
+    sgemm_naive_row,
+    sgemm_smem_tiling,
+    sgemm_warptiling_v0_128x128x8_32x64x8,
+    sgemm_warptiling_v0_128x128x8_64x32x8,
+    sgemm_warptiling_v1_128x128x8_32x64x8,
+    sgemm_warptiling_v1_128x128x8_64x32x8,
+    sgemm_warptiling_v2_128x128x8_32x64x8,
+    sgemm_warptiling_v2_128x128x8_64x32x8,
+    sgemm_warptiling_v2_128x128x16_32x64x16,
+    sgemm_warptiling_v3_128x128x8_32x64x8,
+    sgemm_warptiling_v3_128x128x8_64x32x8,
+    sgemm_warptiling_v3_128x128x16_32x64x16,
+    sgemm_warptiling_v4_128x128x8_32x64x8,
+    sgemm_warptiling_v4_128x128x8_64x32x8,
+    sgemm_warptiling_v4_128x128x16_32x64x16,
+    sgemm_warptiling_v5_128x128x8_32x64x8,
+    sgemm_warptiling_v5_128x128x8_64x32x8,
+    sgemm_warptiling_v5_128x128x16_32x64x16,
 )
 
-torch.manual_seed(42)
-
-M = N = K = 1024
 DEVICE = "cuda"
-
-input = torch.randn(M, K, dtype=torch.float32, device=DEVICE) / 1e2
-other = torch.randn(K, N, dtype=torch.float32, device=DEVICE) / 1e2
-
-ref_out = torch.matmul(input, other)
-out = torch.empty_like(ref_out)
-
-# naive
-sgemm_naive(input, other, out)
-assert torch.allclose(ref_out, out)
-
-# shmem
-out.copy_(torch.zeros_like(out))
-sgemm_shmem(input, other, out)
-assert torch.allclose(ref_out, out)
-
-# shmem 1d blocktile (64x64x8_8x1x1)
-out.copy_(torch.zeros_like(out))
-sgemm_64x64x8_1d(input, other, out)
-assert torch.allclose(ref_out, out)
-
-# shmem 2d blocktile (128x128x8_8x8x1)
-out.copy_(torch.zeros_like(out))
-sgemm_128x128x8_8x8x1(input, other, out)
-assert torch.allclose(ref_out, out)
-
-# shmem vectorized 2d blocktile (128x128x8_8x8x1)
-out.copy_(torch.zeros_like(out))
-sgemm_vec_128x128x8_8x8x1(input, other, out)
-assert torch.allclose(ref_out, out)
-
-# shmem vectorized 2d blocktile (128x128x8_8x8x1_pad)
-out.copy_(torch.zeros_like(out))
-sgemm_vec_128x128x8_8x8x1_pad(input, other, out)
-assert torch.allclose(ref_out, out)
+BASE_SHAPE = (4096, 4096, 4096)
+ATOL = 1e-4
+RTOL = 1e-4
 
 
-# shmem vectorized 2d blocktile (128x128x16_8x8x1_pad)
-out.copy_(torch.zeros_like(out))
-sgemm_vec_128x128x16_8x8x1_pad(input, other, out)
-assert torch.allclose(ref_out, out)
+def test_kernel(kernel, shape):
+    M, N, K = shape
+    input = torch.randn(M, K, dtype=torch.float32, device=DEVICE) / 1e2
+    other = torch.randn(K, N, dtype=torch.float32, device=DEVICE) / 1e2
+    out = torch.empty(M, N, dtype=torch.float32, device=DEVICE)
+    ref_out = torch.matmul(input, other)
 
-# shmem warp tiling 2d blocktile (128x128x8_64x32x1_8x8x1)
-out.copy_(torch.zeros_like(out))
-sgemm_warptiling_128x128x16_64x32x1_8x8x1(input, other, out)
-assert torch.allclose(ref_out, out)
+    out.zero_()
+    range_id = torch.cuda.nvtx.range_start("sgemm_profile")
+    kernel(input, other, out=out)
+    torch.cuda.nvtx.range_end(range_id)
+    assert torch.allclose(ref_out, out, atol=ATOL, rtol=RTOL), f"kernel failed for shape M={M}, N={N}, K={K}"
+
+
+KERNELS = [
+    ("torch.matmul", torch.matmul),
+    ("cutlass_simt_128x128x8_64x32x8_2stage", sgemm_cutlass_simt_128x128x8_64x32x8_2stage),
+    ("cutlass_simt_128x128x8_32x64x8_2stage", sgemm_cutlass_simt_128x128x8_32x64x8_2stage),
+    ("cutlass_universal_simt_128x256_8x4", sgemm_cutlass_universal_simt_128x256_8x4),
+    ("naive_row", sgemm_naive_row),
+    ("naive_col", sgemm_naive_col),
+    ("smem_tiling", sgemm_smem_tiling),
+    ("blocktiling_1d_64x64x8_8_no_pad", sgemm_blocktiling_1d_64x64x8_8_no_pad),
+    ("blocktiling_1d_64x64x8_8_pad4", sgemm_blocktiling_1d_64x64x8_8_pad4),
+    ("blocktiling_1d_64x64x8_16_pad4", sgemm_blocktiling_1d_64x64x8_16_pad4),
+    ("blocktiling_1d_128x128x8_64_pad4", sgemm_blocktiling_1d_128x128x8_64_pad4),
+    ("blocktiling_1d_128x128x16_64_pad4", sgemm_blocktiling_1d_128x128x16_64_pad4),
+    ("blocktiling_2d_128x128x8_8x8_pad4", sgemm_blocktiling_2d_128x128x8_8x8_pad4),
+    ("blocktiling_2d_128x128x16_8x8_pad4", sgemm_blocktiling_2d_128x128x16_8x8_pad4),
+    ("blocktiling_2d_vec4_128x128x8_8x8_pad4", sgemm_blocktiling_2d_vec4_128x128x8_8x8_pad4),
+    ("blocktiling_2d_vec4_128x128x16_8x8_pad4", sgemm_blocktiling_2d_vec4_128x128x16_8x8_pad4),
+    ("warptiling_v0_128x128x8_32x64x8", sgemm_warptiling_v0_128x128x8_32x64x8),
+    ("warptiling_v0_128x128x8_64x32x8", sgemm_warptiling_v0_128x128x8_64x32x8),
+    ("warptiling_v1_128x128x8_32x64x8", sgemm_warptiling_v1_128x128x8_32x64x8),
+    ("warptiling_v1_128x128x8_64x32x8", sgemm_warptiling_v1_128x128x8_64x32x8),
+    ("warptiling_v2_128x128x8_32x64x8", sgemm_warptiling_v2_128x128x8_32x64x8),
+    ("warptiling_v2_128x128x8_64x32x8", sgemm_warptiling_v2_128x128x8_64x32x8),
+    ("warptiling_v2_128x128x16_32x64x16", sgemm_warptiling_v2_128x128x16_32x64x16),
+    ("warptiling_v3_128x128x8_32x64x8", sgemm_warptiling_v3_128x128x8_32x64x8),
+    ("warptiling_v3_128x128x8_64x32x8", sgemm_warptiling_v3_128x128x8_64x32x8),
+    ("warptiling_v3_128x128x16_32x64x16", sgemm_warptiling_v3_128x128x16_32x64x16),
+    ("warptiling_v4_128x128x8_32x64x8", sgemm_warptiling_v4_128x128x8_32x64x8),
+    ("warptiling_v4_128x128x8_64x32x8", sgemm_warptiling_v4_128x128x8_64x32x8),
+    ("warptiling_v4_128x128x16_32x64x16", sgemm_warptiling_v4_128x128x16_32x64x16),
+    ("warptiling_v5_128x128x8_32x64x8", sgemm_warptiling_v5_128x128x8_32x64x8),
+    ("warptiling_v5_128x128x8_64x32x8", sgemm_warptiling_v5_128x128x8_64x32x8),
+    ("warptiling_v5_128x128x16_32x64x16", sgemm_warptiling_v5_128x128x16_32x64x16),
+]
+
+
+def main():
+    torch.manual_seed(42)
+
+    for name, kernel in KERNELS:
+        print(f"test {name} @ {BASE_SHAPE}")
+        test_kernel(kernel, BASE_SHAPE)
+
+
+if __name__ == "__main__":
+    main()

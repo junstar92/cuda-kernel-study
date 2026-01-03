@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.python-version
 
 # C extensions
 *.so
@@ -293,3 +294,7 @@ dkms.conf
 
 # Others
 */results
+*/artifacts
+*.ncu-rep
+*.nsys-rep
+XX_*

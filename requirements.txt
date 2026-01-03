@@ -2,3 +2,6 @@ torch
 matplotlib
 ninja
 pandas
+tqdm
+setuptools
+numpy

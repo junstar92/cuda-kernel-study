@@ -1,19 +1,12 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import product
 
 import numpy as np
 import pandas as pd
 import torch
-from sgemm import (
-    sgemm_64x64x8_1d,
-    sgemm_128x128x8_8x8x1,
-    sgemm_naive,
-    sgemm_shmem,
-    sgemm_vec_128x128x8_8x8x1,
-    sgemm_vec_128x128x8_8x8x1_pad,
-    sgemm_vec_128x128x16_8x8x1_pad,
-    sgemm_warptiling_128x128x16_64x32x1_8x8x1,
-)
+from test import KERNELS
+from tqdm import tqdm
 
 DEVICE = torch.device("cuda", index=0)
 
@@ -45,31 +38,26 @@ class KernelInfo:
 
 
 class BenchmarkRunner:
-    def __init__(self, config: BenchmarkConfig):
+    def __init__(self, config: BenchmarkConfig, skip_kernels: list[str] | None = None):
+        skip_kernels = skip_kernels or ["naive_col"]
         self.config = config
-        self.kernels = [
-            KernelInfo("torch", torch.matmul),
-            KernelInfo("naive", sgemm_naive),
-            KernelInfo("shmem", sgemm_shmem),
-            KernelInfo("shmem_64x64x8_1d", sgemm_64x64x8_1d),
-            KernelInfo("shmem_128x128x8_8x8x1", sgemm_128x128x8_8x8x1),
-            KernelInfo("sgemm_vec_128x128x8_8x8x1", sgemm_vec_128x128x8_8x8x1),
-            KernelInfo("sgemm_vec_128x128x8_8x8x1_pad", sgemm_vec_128x128x8_8x8x1_pad),
-            KernelInfo("sgemm_vec_128x128x16_8x8x1_pad", sgemm_vec_128x128x16_8x8x1_pad),
-            KernelInfo(
-                "sgemm_warptiling_128x128x16_64x32x1_8x8x1",
-                sgemm_warptiling_128x128x16_64x32x1_8x8x1,
-            ),
-        ]
+        self.kernels = []
+
+        for name, func in KERNELS:
+            if name in skip_kernels:
+                continue
+            self.kernels.append(KernelInfo(name, func))
 
     def run_all_benchmarks(self) -> list[BenchmarkResult]:
         results = []
+        errors = []
+        total_cases = len(self.kernels) * len(self.config.matrix_sizes)
 
-        for kernel_info in self.kernels:
-            print(f"\n{kernel_info.name}")
-
-            for matrix_size in self.config.matrix_sizes:
+        with tqdm(total=total_cases, unit="case") as progress:
+            for kernel_info, matrix_size in product(self.kernels, self.config.matrix_sizes):
                 M, N, K = matrix_size, matrix_size, matrix_size
+                progress.set_postfix_str(f"{kernel_info.name} @ ({M}x{N}x{K})")
+
                 a = torch.randn(M, K, dtype=torch.float32, device=DEVICE) / 1e2
                 b = torch.randn(K, N, dtype=torch.float32, device=DEVICE) / 1e2
                 c = torch.empty(M, N, dtype=torch.float32, device=DEVICE)
@@ -94,10 +82,15 @@ class BenchmarkRunner:
                     )
 
                     results.append(result)
-                    print(f"    {elapsed_time_ms:8.3f} ms, {tflops:8.3f} TFLOPS @ {M}x{N}x{K}")
-
                 except Exception as e:
-                    print(f"    ERROR: {str(e)} @ {M}x{N}x{K}")
+                    errors.append((kernel_info.name, (M, N, K), str(e)))
+                finally:
+                    progress.update(1)
+
+        if errors:
+            print("\nBenchmark failures:")
+            for kernel_name, matrix_size, error in errors:
+                print(f"{kernel_name} @ {matrix_size}: {error}")
 
         return results
 
@@ -108,7 +101,7 @@ class BenchmarkRunner:
 
 class ResultFormatter:
     @staticmethod
-    def create_tflops_dataframe(results: list[BenchmarkResult]) -> pd.DataFrame:
+    def create_dataframes(results: list[BenchmarkResult]) -> tuple[pd.DataFrame, pd.DataFrame]:
         kernel_results = {}
         matrix_sizes = set()
 
@@ -118,25 +111,33 @@ class ResultFormatter:
 
             if result.kernel_name not in kernel_results:
                 kernel_results[result.kernel_name] = {}
-            kernel_results[result.kernel_name][size] = result.tflops
+            kernel_results[result.kernel_name][size] = (
+                result.elapsed_time_ms,
+                result.tflops,
+            )
 
         matrix_sizes = sorted(matrix_sizes)
 
-        data = {}
+        msec = {}
+        tflops = {}
         for size in matrix_sizes:
-            data[f"{size}"] = []
+            msec[f"{size}"] = []
+            tflops[f"{size}"] = []
 
         kernel_names = kernel_results.keys()
 
         for kernel_name in kernel_names:
             for size in matrix_sizes:
                 if size in kernel_results[kernel_name]:
-                    data[f"{size}"].append(kernel_results[kernel_name][size])
+                    msec[f"{size}"].append(kernel_results[kernel_name][size][0])
+                    tflops[f"{size}"].append(kernel_results[kernel_name][size][1])
                 else:
-                    data[f"{size}"].append(None)
+                    msec[f"{size}"].append(None)
+                    tflops[f"{size}"].append(None)
 
-        df = pd.DataFrame(data, index=kernel_names)
-        return df
+        msec_df = pd.DataFrame(msec, index=kernel_names)
+        tflops_df = pd.DataFrame(tflops, index=kernel_names)
+        return msec_df, tflops_df
 
 
 def run_mm(
@@ -165,20 +166,23 @@ def run_mm(
 def main():
     torch.set_default_device(DEVICE)
 
-    config = BenchmarkConfig(matrix_sizes=[256, 512, 1024, 2048, 4096])
+    config = BenchmarkConfig(matrix_sizes=[128, 256, 512, 1024, 2048, 4096])
 
     runner = BenchmarkRunner(config)
     results = runner.run_all_benchmarks()
 
     formatter = ResultFormatter()
-    tflops_df = formatter.create_tflops_dataframe(results)
+    msec_df, tflops_df = formatter.create_dataframes(results)
 
     print(f"\n\nDevice: {DEVICE}")
     print(f"Warmup iterations: {config.warmup_iterations}")
     print(f"Benchmark iterations: {config.benchmark_iterations}")
     print(f"Matrix sizes: {config.matrix_sizes}\n")
 
-    print(f"{'TFLOPS Performance (M=N=K):'}")
+    print(f"\n{'Elapsed Time (M=N=K):'}")
+    print(msec_df)
+
+    print(f"\n{'TFLOPS (M=N=K):'}")
     print(tflops_df)
 
     print(f"\n{'=' * 100}")
@@ -190,4 +194,4 @@ def main():
 
 if __name__ == "__main__":
     df = main()
-    df.to_csv("sgemm_performance.csv")
+    # df.to_csv("sgemm_performance.csv")
